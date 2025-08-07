@@ -1,19 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from db.base import SessionLocal
+from db.session import get_db
 from db.models import Property
 from schemas.property import PropertyCreate, PropertyRead, PropertyUpdate
 
 router = APIRouter(prefix="/properties", tags=["properties"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.get("/", response_model=List[PropertyRead])

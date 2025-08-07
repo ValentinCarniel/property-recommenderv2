@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy.orm import Session
 from db.session import get_db
 from db import models
 from schemas.user import UserCreate, UserOut, UserLogin, Token
@@ -10,34 +9,30 @@ router = APIRouter()
 
 
 @router.post("/register", response_model=UserOut)
-async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
+def register(user: UserCreate, db: Session = Depends(get_db)):
     try:
         # Verificar si ya existe un usuario con ese email
-        result_email = await db.execute(
-            select(models.User).where(models.User.email == user.email)
-        )
-        if result_email.scalar():
+        existing_email = db.query(models.User).filter(
+            models.User.email == user.email).first()
+        if existing_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El email ya está registrado."
             )
 
         # Verificar si ya existe un usuario con ese username
-        result_username = await db.execute(
-            select(models.User).where(models.User.username == user.username)
-        )
-        if result_username.scalar():
+        existing_username = db.query(models.User).filter(
+            models.User.username == user.username).first()
+        if existing_username:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El username ya está registrado."
             )
 
         # Buscar rol en tabla de roles (por nombre: 'user' o 'admin')
-        role_name = user.role.value if user.role else "user"  # enum -> str
-        role_result = await db.execute(
-            select(models.Role).where(models.Role.name == role_name)
-        )
-        role = role_result.scalar_one_or_none()
+        role_name = user.role.value if user.role else "user"
+        role = db.query(models.Role).filter(
+            models.Role.name == role_name).first()
 
         if not role:
             raise HTTPException(
@@ -54,10 +49,9 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
         )
 
         db.add(new_user)
-        await db.commit()
-        # No hacemos await db.refresh(new_user) para evitar error async
+        db.commit()
+        db.refresh(new_user)
 
-        # Retornamos manualmente UserOut armado con datos y rol
         return UserOut(
             id=new_user.id,
             username=new_user.username,
@@ -74,20 +68,15 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(models.User).where(models.User.email == user.email)
-    )
-    db_user = result.scalar_one_or_none()
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(
+        models.User.email == user.email).first()
 
     if not db_user or not verify_password(user.password, db_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos."
         )
-
-    # Cargar relación con rol
-    await db.refresh(db_user, attribute_names=["role"])
 
     if not db_user.role:
         raise HTTPException(

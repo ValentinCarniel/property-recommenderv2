@@ -1,69 +1,69 @@
+// lib/auth.ts
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import bcrypt from "bcryptjs";
-
-// Simulamos una base de datos simple en memoria
-// En producción usarías una base de datos real
-const users = [
-  {
-    id: "1",
-    name: "Usuario Demo",
-    email: "demo@example.com",
-    password: "$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi", // "password"
-  },
-];
+import axios from "axios";
 
 export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET, // <-- clave secreta para cifrado
+
   providers: [
     CredentialsProvider({
       name: "credentials",
       credentials: {
         email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" }
+        password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           return null;
         }
 
-        const user = users.find(user => user.email === credentials.email);
-        
-        if (!user) {
+        try {
+          // URL corregida: sin /auth, porque en backend no tenés prefijo
+          const response = await axios.post<{ access_token: string }>("http://localhost:8000/login", {
+            email: credentials.email,
+            password: credentials.password,
+          });
+
+          const { access_token } = response.data;
+
+          return {
+            id: credentials.email,
+            email: credentials.email,
+            name: credentials.email, // para cumplir con User
+            accessToken: access_token,
+          };
+        } catch (error: any) {
+          console.error("Login failed:", error.response?.data || error.message);
           return null;
         }
-
-        const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-        
-        if (!isPasswordValid) {
-          return null;
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-        };
-      }
-    })
+      },
+    }),
   ],
+
   session: {
     strategy: "jwt",
   },
-  pages: {
-    signIn: "/auth/signin",
-  },
+
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        token.email = user.email;
+        token.accessToken = (user as any).accessToken;
       }
       return token;
     },
+
     async session({ session, token }) {
-      if (token && session.user) {
-        session.user.id = token.id as string;
-      }
+      session.user.id = token.id as string;
+      session.user.email = token.email as string;
+      session.user.accessToken = token.accessToken as string;
       return session;
     },
   },
-}; 
+
+  pages: {
+    signIn: "/auth/signin",
+  },
+};
